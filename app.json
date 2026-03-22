@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "Agenda Telefonica",
+    "slug": "AgendaTelefonica",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/contact.png",
+    "splash": {
+      "image": "./assets/contact-128.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "updates": {
+      "fallbackToCacheTimeout": 0
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/contact.png",
+        "backgroundColor": "#FFFFFF"
+      },
+      "package": "AgendaContatos.apk"
+    },
+    "web": {
+      "favicon": "./assets/contact.png"
+    }
+  }
+}
