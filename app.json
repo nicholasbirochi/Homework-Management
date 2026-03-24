@@ -1,18 +1,10 @@
 {
   "expo": {
-    "name": "Agenda Telefonica",
-    "slug": "AgendaTelefonica",
+    "name": "Homework Management",
+    "slug": "homework-management-mobile",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/contact.png",
-    "splash": {
-      "image": "./assets/contact-128.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
-    },
-    "updates": {
-      "fallbackToCacheTimeout": 0
-    },
+    "userInterfaceStyle": "dark",
     "assetBundlePatterns": [
       "**/*"
     ],
@@ -20,14 +12,8 @@
       "supportsTablet": true
     },
     "android": {
-      "adaptiveIcon": {
-        "foregroundImage": "./assets/contact.png",
-        "backgroundColor": "#FFFFFF"
-      },
-      "package": "AgendaContatos.apk"
+      "package": "com.n2.homeworkmanagement"
     },
-    "web": {
-      "favicon": "./assets/contact.png"
-    }
+    "web": {}
   }
 }

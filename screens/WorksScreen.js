@@ -1,402 +1,310 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, ScrollView, Alert, Modal, FlatList
+  Alert,
+  FlatList,
+  Modal,
+  SafeAreaView,
+  ScrollView,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-import * as DbService from '../services/dbservice';
+import { useFocusEffect } from '@react-navigation/native';
 import styles, { colors } from '../styles';
+import {
+  createId,
+  deleteWork,
+  getStudents,
+  getWorks,
+  getWorkStudentIds,
+  insertWork,
+  replaceWorkStudents,
+  updateWork,
+} from '../services/db';
+
+const workStatuses = ['pendente', 'concluído', 'cancelado'];
 
 export default function WorksScreen() {
   const [works, setWorks] = useState([]);
   const [students, setStudents] = useState([]);
-  const [id, setId] = useState(null);
-  const [nome, setNome] = useState('');
-  const [dataEntrega, setDataEntrega] = useState('');
-  const [horasEstimadas, setHorasEstimadas] = useState('');
-  const [status, setStatus] = useState('pendente');
   const [modalVisible, setModalVisible] = useState(false);
-  const [studentModalVisible, setStudentModalVisible] = useState(false);
-  const [workStudents, setWorkStudents] = useState([]);
-  const [currentWorkId, setCurrentWorkId] = useState(null);
+  const [editingId, setEditingId] = useState(null);
+  const [name, setName] = useState('');
+  const [dueDate, setDueDate] = useState('');
+  const [estimatedHours, setEstimatedHours] = useState('');
+  const [status, setStatus] = useState('pendente');
+  const [selectedStudentIds, setSelectedStudentIds] = useState([]);
 
-  useEffect(() => {
-    loadWorks();
-    loadStudents();
-  }, []);
+  const loadData = async () => {
+    // Busca trabalhos e alunos juntos para abastecer a listagem e o formulario.
+    const [worksResult, studentsResult] = await Promise.all([getWorks(), getStudents()]);
+    setWorks(worksResult);
+    setStudents(studentsResult);
+  };
 
-  async function loadWorks() {
-    const data = await DbService.obtemTodosTrabalhos();
-    setWorks(data);
-  }
+  useFocusEffect(
+    useCallback(() => {
+      loadData();
+    }, [])
+  );
 
-  async function loadStudents() {
-    const data = await DbService.obtemTodosAlunos();
-    setStudents(data);
-  }
-
-  async function loadWorkStudents(workId) {
-    const data = await DbService.obtemAlunosDoTrabalho(workId);
-    setWorkStudents(data);
-  }
-
-  function createUniqueId() {
-    return Date.now().toString();
-  }
-
-  function resetForm() {
-    setId(null);
-    setNome('');
-    setDataEntrega('');
-    setHorasEstimadas('');
+  const resetForm = () => {
+    setEditingId(null);
+    setName('');
+    setDueDate('');
+    setEstimatedHours('');
     setStatus('pendente');
-  }
+    setSelectedStudentIds([]);
+  };
 
-  async function saveWork() {
-    if (!nome.trim() || !dataEntrega.trim() || !horasEstimadas.trim()) {
-      Alert.alert('Erro', 'Preencha todos os campos');
+  const openCreate = () => {
+    resetForm();
+    setModalVisible(true);
+  };
+
+  const openEdit = async (work) => {
+    // Recarrega os alunos vinculados para preencher corretamente a edicao do trabalho.
+    const studentIds = await getWorkStudentIds(work.id);
+    setEditingId(work.id);
+    setName(work.name);
+    setDueDate(work.due_date);
+    setEstimatedHours(String(work.estimated_hours));
+    setStatus(work.status);
+    setSelectedStudentIds(studentIds);
+    setModalVisible(true);
+  };
+
+  const toggleStudent = (studentId) => {
+    // Adiciona ou remove o aluno da selecao atual do trabalho.
+    setSelectedStudentIds((current) => (
+      current.includes(studentId)
+        ? current.filter((id) => id !== studentId)
+        : [...current, studentId]
+    ));
+  };
+
+  const validate = () => {
+    if (!name.trim() || !dueDate.trim() || !estimatedHours.trim()) {
+      Alert.alert('Validação', 'Informe nome, data de entrega e horas estimadas.');
+      return false;
+    }
+
+    if (Number.isNaN(Number(estimatedHours)) || Number(estimatedHours) <= 0) {
+      Alert.alert('Validação', 'As horas estimadas devem ser maiores que zero.');
+      return false;
+    }
+
+    if (selectedStudentIds.length === 0) {
+      Alert.alert('Validação', 'Selecione pelo menos um aluno para o trabalho.');
+      return false;
+    }
+
+    return true;
+  };
+
+  const saveWork = async () => {
+    // Salva o trabalho e, em seguida, sincroniza os alunos participantes escolhidos.
+    if (!validate()) {
       return;
     }
 
     const work = {
-      id: id || createUniqueId(),
-      nome: nome.trim(),
-      dataEntrega: dataEntrega.trim(),
-      horasEstimadas: parseFloat(horasEstimadas),
+      id: editingId || createId('work'),
+      name: name.trim(),
+      due_date: dueDate.trim(),
+      estimated_hours: Number(estimatedHours),
       status,
     };
 
     try {
-      let success = false;
-      if (id) {
-        success = await DbService.alteraTrabalho(work);
-      } else {
-        success = await DbService.adicionaTrabalho(work);
-      }
-
-      if (success) {
-        Alert.alert('Sucesso', id ? 'Trabalho atualizado!' : 'Trabalho adicionado!');
-        resetForm();
+      const ok = editingId ? await updateWork(work) : await insertWork(work);
+      if (ok) {
+        await replaceWorkStudents(work.id, selectedStudentIds);
         setModalVisible(false);
-        loadWorks();
+        resetForm();
+        await loadData();
       }
     } catch (error) {
-      Alert.alert('Erro', 'Erro ao salvar trabalho: ' + error.message);
+      Alert.alert('Erro', `Não foi possível salvar o trabalho. ${error.message}`);
     }
-  }
+  };
 
-  function editWork(work) {
-    setId(work.id);
-    setNome(work.nome);
-    setDataEntrega(work.dataEntrega);
-    setHorasEstimadas(work.horasEstimadas.toString());
-    setStatus(work.status);
-    setModalVisible(true);
-  }
-
-  async function deleteWork(workId) {
+  const confirmDelete = (work) => {
     Alert.alert(
-      'Confirmar exclusão',
-      'Deseja excluir este trabalho?',
+      'Excluir trabalho',
+      `Deseja remover "${work.name}"? As atividades ligadas a ele também serão removidas.`,
       [
         { text: 'Cancelar', style: 'cancel' },
         {
           text: 'Excluir',
+          style: 'destructive',
           onPress: async () => {
             try {
-              const success = await DbService.excluiTrabalho(workId);
-              if (success) {
-                Alert.alert('Sucesso', 'Trabalho excluído!');
-                loadWorks();
-              }
+              await deleteWork(work.id);
+              await loadData();
             } catch (error) {
-              Alert.alert('Erro', 'Erro ao excluir trabalho');
+              Alert.alert('Erro', 'Não foi possível excluir o trabalho.');
             }
           },
         },
       ]
     );
-  }
+  };
 
-  function openAddModal() {
-    resetForm();
-    setModalVisible(true);
-  }
-
-  function openStudentModal(workId) {
-    setCurrentWorkId(workId);
-    loadWorkStudents(workId);
-    setStudentModalVisible(true);
-  }
-
-  async function addStudentToWork(studentId) {
-    try {
-      const success = await DbService.adicionaAlunoAoTrabalho(currentWorkId, studentId);
-      if (success) {
-        Alert.alert('Sucesso', 'Aluno adicionado ao trabalho!');
-        loadWorkStudents(currentWorkId);
-      }
-    } catch (error) {
-      Alert.alert('Erro', 'Este aluno já está no trabalho');
-    }
-  }
-
-  async function removeStudentFromWork(workId, studentId) {
-    try {
-      const success = await DbService.removeAlunoDoTrabalho(workId, studentId);
-      if (success) {
-        loadWorkStudents(workId);
-      }
-    } catch (error) {
-      Alert.alert('Erro', 'Erro ao remover aluno');
-    }
-  }
-
-  function getStatusColor(status) {
-    switch (status) {
-      case 'concluído':
-        return colors.success;
-      case 'cancelado':
-        return colors.error;
-      default:
-        return colors.warn;
-    }
-  }
+  const statusColor = (value) => {
+    if (value === 'concluído') return colors.success;
+    if (value === 'cancelado') return colors.error;
+    return colors.warning;
+  };
 
   const renderWork = ({ item }) => (
     <View style={styles.card}>
-      <View style={styles.cardRow}>
+      <View style={styles.row}>
         <View style={{ flex: 1 }}>
-          <Text style={styles.text}>{item.nome}</Text>
-          <Text style={styles.textSecondary}>Entrega: {item.dataEntrega}</Text>
-          <Text style={styles.textSecondary}>
-            Horas: {item.horasEstimadas}h
-          </Text>
+          <Text style={styles.strongText}>{item.name}</Text>
+          <Text style={styles.mutedText}>Entrega: {item.due_date}</Text>
+          <Text style={styles.mutedText}>Horas estimadas: {item.estimated_hours}h</Text>
+          <Text style={styles.mutedText}>Alunos: {item.students_count} | Atividades: {item.activities_count}</Text>
         </View>
-        <View
-          style={[
-            styles.statusBadge,
-            { backgroundColor: getStatusColor(item.status) },
-          ]}
-        >
-          <Text style={styles.statusText}>{item.status}</Text>
+        <View style={[styles.badge, { backgroundColor: statusColor(item.status) }]}> 
+          <Text style={styles.badgeText}>{item.status}</Text>
         </View>
       </View>
 
-      <View style={[styles.buttonContainer, { marginTop: 8 }]}>
+      {/* Controles de manutencao do trabalho selecionado na lista. */}
+      <View style={[styles.row, { marginTop: 12 }]}> 
         <TouchableOpacity
-          style={[styles.smallButton, { backgroundColor: colors.secondary, flex: 1 }]}
-          onPress={() => openStudentModal(item.id)}
+          style={[styles.smallButton, styles.button, { flex: 1 }]}
+          onPress={() => openEdit(item)}
         >
-          <Text style={styles.smallButtonText}>Alunos</Text>
+          <Text style={styles.buttonText}>Editar</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.smallButton, { backgroundColor: colors.primary, flex: 1 }]}
-          onPress={() => editWork(item)}
+          style={[styles.smallButton, styles.buttonDanger, { flex: 1 }]}
+          onPress={() => confirmDelete(item)}
         >
-          <Text style={styles.smallButtonText}>Editar</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.smallButton, { backgroundColor: colors.error, flex: 1 }]}
-          onPress={() => deleteWork(item.id)}
-        >
-          <Text style={styles.smallButtonText}>Excluir</Text>
+          <Text style={styles.buttonText}>Excluir</Text>
         </TouchableOpacity>
       </View>
-    </View>
-  );
-
-  const renderStudent = ({ item }) => (
-    <View style={styles.listItem}>
-      <View style={styles.listItemText}>
-        <Text style={styles.text}>{item.nome}</Text>
-      </View>
-      <TouchableOpacity
-        style={[styles.smallButton, { backgroundColor: colors.error }]}
-        onPress={() => removeStudentFromWork(currentWorkId, item.id)}
-      >
-        <Text style={styles.smallButtonText}>Remover</Text>
-      </TouchableOpacity>
     </View>
   );
 
   return (
-    <View style={styles.screenContainer}>
-      {/* Header */}
-      <View style={{ marginBottom: 16 }}>
-        <Text style={styles.title}>Gerenciar Trabalhos</Text>
-        <TouchableOpacity style={styles.button} onPress={openAddModal}>
-          <Text style={styles.buttonText}>+ Novo Trabalho</Text>
+    <SafeAreaView style={styles.safe}>
+      <View style={styles.screen}>
+        <Text style={styles.title}>CRUD de Trabalhos</Text>
+        <Text style={styles.helper}>Cadastre o trabalho, vincule os alunos participantes e acompanhe sua situação.</Text>
+
+        <TouchableOpacity style={[styles.button, { marginBottom: 16 }]} onPress={openCreate}>
+          <Text style={styles.buttonText}>+ Novo trabalho</Text>
         </TouchableOpacity>
-      </View>
 
-      {/* Lista de trabalhos */}
-      {works.length > 0 ? (
-        <FlatList
-          data={works}
-          renderItem={renderWork}
-          keyExtractor={(item) => item.id}
-          scrollEnabled={false}
-        />
-      ) : (
-        <View style={{ alignItems: 'center', justifyContent: 'center', flex: 1 }}>
-          <Text style={styles.textSecondary}>Nenhum trabalho cadastrado</Text>
-        </View>
-      )}
+        {works.length === 0 ? (
+          <View style={styles.emptyBox}>
+            <Text style={styles.mutedText}>Nenhum trabalho cadastrado.</Text>
+          </View>
+        ) : (
+          <FlatList
+            data={works}
+            keyExtractor={(item) => item.id}
+            renderItem={renderWork}
+            contentContainerStyle={styles.listGap}
+          />
+        )}
 
-      {/* Modal para adicionar/editar trabalho */}
-      <Modal
-        animationType="slide"
-        transparent={true}
-        visible={modalVisible}
-        onRequestClose={() => setModalVisible(false)}
-      >
-        <View style={styles.centeredView}>
-          <ScrollView
-            contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }}
-          >
-            <View style={[styles.modalView, { width: '90%' }]}>
-              <Text style={styles.subtitle}>
-                {id ? 'Editar Trabalho' : 'Novo Trabalho'}
-              </Text>
+        <Modal visible={modalVisible} transparent animationType="slide" onRequestClose={() => setModalVisible(false)}>
+          <View style={styles.modalOverlay}>
+            <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }}>
+              <View style={styles.modalCard}>
+                <Text style={styles.subtitle}>{editingId ? 'Editar trabalho' : 'Novo trabalho'}</Text>
 
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>Nome do Trabalho</Text>
+                <Text style={styles.label}>Nome do trabalho</Text>
                 <TextInput
                   style={styles.input}
-                  placeholder="Digite o nome do trabalho"
-                  placeholderTextColor={colors.textSecondary}
-                  value={nome}
-                  onChangeText={setNome}
+                  value={name}
+                  onChangeText={setName}
+                  placeholder="Ex.: Trabalho de Cálculo"
+                  placeholderTextColor={colors.textMuted}
                 />
-              </View>
 
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>Data de Entrega</Text>
+                <Text style={styles.label}>Data de entrega</Text>
                 <TextInput
                   style={styles.input}
-                  placeholder="DD/MM/YYYY"
-                  placeholderTextColor={colors.textSecondary}
-                  value={dataEntrega}
-                  onChangeText={setDataEntrega}
+                  value={dueDate}
+                  onChangeText={setDueDate}
+                  placeholder="Ex.: 24/03/2026"
+                  placeholderTextColor={colors.textMuted}
                 />
-              </View>
 
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>Horas Estimadas</Text>
+                <Text style={styles.label}>Estimativa total de horas</Text>
                 <TextInput
                   style={styles.input}
-                  placeholder="Digite as horas"
-                  placeholderTextColor={colors.textSecondary}
-                  value={horasEstimadas}
-                  onChangeText={setHorasEstimadas}
+                  value={estimatedHours}
+                  onChangeText={setEstimatedHours}
+                  placeholder="Ex.: 12"
+                  placeholderTextColor={colors.textMuted}
                   keyboardType="decimal-pad"
                 />
-              </View>
 
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>Status</Text>
-                <View style={{ flexDirection: 'row', gap: 8 }}>
-                  {['pendente', 'concluído', 'cancelado'].map((s) => (
+                <Text style={styles.label}>Situação do trabalho</Text>
+                <View style={[styles.wrapRow, { marginBottom: 12 }]}> 
+                  {workStatuses.map((item) => (
                     <TouchableOpacity
-                      key={s}
-                      style={[
-                        styles.button,
-                        {
-                          flex: 1,
-                          backgroundColor:
-                            status === s ? colors.primary : colors.surface,
-                          borderWidth: 1,
-                          borderColor: colors.primary,
-                        },
-                      ]}
-                      onPress={() => setStatus(s)}
+                      key={item}
+                      style={[styles.pill, status === item && styles.pillActive]}
+                      onPress={() => setStatus(item)}
                     >
-                      <Text style={styles.buttonText}>{s}</Text>
+                      <Text style={styles.pillText}>{item}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>
-              </View>
 
-              <View style={styles.buttonContainer}>
-                <TouchableOpacity
-                  style={[styles.button, styles.buttonSecondary]}
-                  onPress={() => {
-                    resetForm();
-                    setModalVisible(false);
-                  }}
-                >
-                  <Text style={styles.buttonText}>Cancelar</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.button, styles.buttonSuccess]}
-                  onPress={saveWork}
-                >
-                  <Text style={styles.buttonText}>Salvar</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </ScrollView>
-        </View>
-      </Modal>
+                <Text style={styles.label}>Alunos do trabalho</Text>
+                {/* Permite montar a equipe do trabalho diretamente no cadastro. */}
+                {students.length === 0 ? (
+                  <View style={styles.emptyBox}>
+                    <Text style={styles.mutedText}>Cadastre alunos antes de criar um trabalho.</Text>
+                  </View>
+                ) : (
+                  <View style={[styles.wrapRow, { marginBottom: 12 }]}> 
+                    {students.map((student) => {
+                      const active = selectedStudentIds.includes(student.id);
+                      return (
+                        <TouchableOpacity
+                          key={student.id}
+                          style={[styles.pill, active && styles.pillActive]}
+                          onPress={() => toggleStudent(student.id)}
+                        >
+                          <Text style={styles.pillText}>{student.name}</Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                )}
 
-      {/* Modal para gerenciar alunos do trabalho */}
-      <Modal
-        animationType="slide"
-        transparent={true}
-        visible={studentModalVisible}
-        onRequestClose={() => setStudentModalVisible(false)}
-      >
-        <View style={styles.centeredView}>
-          <View style={[styles.modalView, { width: '95%', height: '80%' }]}>
-            <Text style={styles.subtitle}>Alunos do Trabalho</Text>
-
-            <Text style={[styles.label, { marginTop: 16 }]}>
-              Alunos Registrados:
-            </Text>
-            {workStudents.length > 0 ? (
-              <FlatList
-                data={workStudents}
-                renderItem={renderStudent}
-                keyExtractor={(item) => item.id}
-                scrollEnabled={false}
-                style={{ maxHeight: 150 }}
-              />
-            ) : (
-              <Text style={styles.textSecondary}>
-                Nenhum aluno adicionado
-              </Text>
-            )}
-
-            <Text style={[styles.label, { marginTop: 16 }]}>
-              Adicionar Aluno:
-            </Text>
-            <FlatList
-              data={students.filter(
-                (s) => !workStudents.find((ws) => ws.id === s.id)
-              )}
-              renderItem={({ item }) => (
-                <View style={styles.listItem}>
-                  <Text style={styles.text}>{item.nome}</Text>
+                <View style={styles.row}>
                   <TouchableOpacity
-                    style={[styles.smallButton, { backgroundColor: colors.success }]}
-                    onPress={() => addStudentToWork(item.id)}
+                    style={[styles.button, styles.buttonOutline, { flex: 1 }]}
+                    onPress={() => {
+                      setModalVisible(false);
+                      resetForm();
+                    }}
                   >
-                    <Text style={styles.smallButtonText}>Adicionar</Text>
+                    <Text style={styles.buttonText}>Cancelar</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.button, styles.buttonSuccess, { flex: 1 }]}
+                    onPress={saveWork}
+                  >
+                    <Text style={styles.buttonText}>Salvar</Text>
                   </TouchableOpacity>
                 </View>
-              )}
-              keyExtractor={(item) => item.id}
-              scrollEnabled={false}
-            />
-
-            <TouchableOpacity
-              style={[styles.button, { marginTop: 16 }]}
-              onPress={() => setStudentModalVisible(false)}
-            >
-              <Text style={styles.buttonText}>Fechar</Text>
-            </TouchableOpacity>
+              </View>
+            </ScrollView>
           </View>
-        </View>
-      </Modal>
-    </View>
+        </Modal>
+      </View>
+    </SafeAreaView>
   );
 }

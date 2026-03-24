@@ -1,208 +1,207 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, ScrollView, Alert, Modal, FlatList
+  Alert,
+  FlatList,
+  Modal,
+  SafeAreaView,
+  ScrollView,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-import * as DbService from '../services/dbservice';
+import { useFocusEffect } from '@react-navigation/native';
 import styles, { colors } from '../styles';
+import {
+  createId,
+  deleteStudent,
+  getStudents,
+  insertStudent,
+  updateStudent,
+} from '../services/db';
 
 export default function StudentsScreen() {
   const [students, setStudents] = useState([]);
-  const [id, setId] = useState(null);
-  const [nome, setNome] = useState('');
-  const [matricula, setMatricula] = useState('');
   const [modalVisible, setModalVisible] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [name, setName] = useState('');
+  const [registration, setRegistration] = useState('');
 
-  useEffect(() => {
-    loadStudents();
-  }, []);
+  const loadStudents = async () => {
+    // Atualiza a lista sempre a partir do banco para refletir o estado mais recente.
+    const result = await getStudents();
+    setStudents(result);
+  };
 
-  async function loadStudents() {
-    const data = await DbService.obtemTodosAlunos();
-    setStudents(data);
-  }
+  useFocusEffect(
+    useCallback(() => {
+      loadStudents();
+    }, [])
+  );
 
-  function createUniqueId() {
-    return Date.now().toString();
-  }
+  const resetForm = () => {
+    setEditingId(null);
+    setName('');
+    setRegistration('');
+  };
 
-  function resetForm() {
-    setId(null);
-    setNome('');
-    setMatricula('');
-  }
+  const openCreate = () => {
+    resetForm();
+    setModalVisible(true);
+  };
 
-  async function saveStudent() {
-    if (!nome.trim() || !matricula.trim()) {
-      Alert.alert('Erro', 'Preencha todos os campos');
+  const openEdit = (student) => {
+    setEditingId(student.id);
+    setName(student.name);
+    setRegistration(student.registration);
+    setModalVisible(true);
+  };
+
+  const saveStudent = async () => {
+    // Valida os campos antes de decidir entre criacao ou edicao do aluno.
+    if (!name.trim() || !registration.trim()) {
+      Alert.alert('Validação', 'Informe nome e matrícula do aluno.');
       return;
     }
 
     const student = {
-      id: id || createUniqueId(),
-      nome: nome.trim(),
-      matricula: matricula.trim(),
+      id: editingId || createId('student'),
+      name: name.trim(),
+      registration: registration.trim(),
     };
 
     try {
-      let success = false;
-      if (id) {
-        success = await DbService.alteraAluno(student);
-      } else {
-        success = await DbService.adicionaAluno(student);
-      }
-
-      if (success) {
-        Alert.alert('Sucesso', id ? 'Aluno atualizado!' : 'Aluno adicionado!');
-        resetForm();
+      const ok = editingId ? await updateStudent(student) : await insertStudent(student);
+      if (ok) {
         setModalVisible(false);
-        loadStudents();
+        resetForm();
+        await loadStudents();
       }
     } catch (error) {
-      Alert.alert('Erro', 'Erro ao salvar aluno: ' + error.message);
+      Alert.alert('Erro', `Não foi possível salvar o aluno. ${error.message}`);
     }
-  }
+  };
 
-  function editStudent(student) {
-    setId(student.id);
-    setNome(student.nome);
-    setMatricula(student.matricula);
-    setModalVisible(true);
-  }
-
-  async function deleteStudent(studentId) {
+  const confirmDelete = (student) => {
+    // Pede confirmacao porque a exclusao tambem afeta vinculos e atividades relacionadas.
     Alert.alert(
-      'Confirmar exclusão',
-      'Deseja excluir este aluno?',
+      'Excluir aluno',
+      `Deseja remover ${student.name}? As relações com trabalhos e atividades também serão removidas.`,
       [
         { text: 'Cancelar', style: 'cancel' },
         {
           text: 'Excluir',
+          style: 'destructive',
           onPress: async () => {
             try {
-              const success = await DbService.excluiAluno(studentId);
-              if (success) {
-                Alert.alert('Sucesso', 'Aluno excluído!');
-                loadStudents();
-              }
+              await deleteStudent(student.id);
+              await loadStudents();
             } catch (error) {
-              Alert.alert('Erro', 'Erro ao excluir aluno');
+              Alert.alert('Erro', 'Não foi possível excluir o aluno.');
             }
           },
         },
       ]
     );
-  }
+  };
 
-  function openAddModal() {
-    resetForm();
-    setModalVisible(true);
-  }
-
-  const renderStudent = ({ item }) => (
-    <View style={styles.listItem}>
-      <View style={styles.listItemText}>
-        <Text style={styles.text}>{item.nome}</Text>
-        <Text style={styles.textSecondary}>Matrícula: {item.matricula}</Text>
+  const renderItem = ({ item }) => (
+    <View style={styles.card}>
+      <View style={styles.row}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.strongText}>{item.name}</Text>
+          <Text style={styles.mutedText}>Matrícula: {item.registration}</Text>
+        </View>
       </View>
-      <View style={styles.listItemActions}>
+
+      {/* Acoes principais disponiveis para cada aluno listado. */}
+      <View style={[styles.row, { marginTop: 12 }]}> 
         <TouchableOpacity
-          style={[styles.smallButton, { backgroundColor: colors.primary }]}
-          onPress={() => editStudent(item)}
+          style={[styles.smallButton, styles.button, { flex: 1 }]}
+          onPress={() => openEdit(item)}
         >
-          <Text style={styles.smallButtonText}>Editar</Text>
+          <Text style={styles.buttonText}>Editar</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.smallButton, { backgroundColor: colors.error }]}
-          onPress={() => deleteStudent(item.id)}
+          style={[styles.smallButton, styles.buttonDanger, { flex: 1 }]}
+          onPress={() => confirmDelete(item)}
         >
-          <Text style={styles.smallButtonText}>Excluir</Text>
+          <Text style={styles.buttonText}>Excluir</Text>
         </TouchableOpacity>
       </View>
     </View>
   );
 
   return (
-    <View style={styles.screenContainer}>
-      {/* Header */}
-      <View style={{ marginBottom: 16 }}>
-        <Text style={styles.title}>Gerenciar Alunos</Text>
-        <TouchableOpacity
-          style={styles.button}
-          onPress={openAddModal}
-        >
-          <Text style={styles.buttonText}>+ Novo Aluno</Text>
+    <SafeAreaView style={styles.safe}>
+      <View style={styles.screen}>
+        <Text style={styles.title}>CRUD de Alunos</Text>
+        <Text style={styles.helper}>Cadastre, edite e remova os alunos que participarão dos trabalhos.</Text>
+
+        <TouchableOpacity style={[styles.button, { marginBottom: 16 }]} onPress={openCreate}>
+          <Text style={styles.buttonText}>+ Novo aluno</Text>
         </TouchableOpacity>
-      </View>
 
-      {/* Lista de alunos */}
-      {students.length > 0 ? (
-        <FlatList
-          data={students}
-          renderItem={renderStudent}
-          keyExtractor={(item) => item.id}
-          scrollEnabled={false}
-        />
-      ) : (
-        <View style={{ alignItems: 'center', justifyContent: 'center', flex: 1 }}>
-          <Text style={styles.textSecondary}>Nenhum aluno cadastrado</Text>
-        </View>
-      )}
-
-      {/* Modal para adicionar/editar */}
-      <Modal
-        animationType="slide"
-        transparent={true}
-        visible={modalVisible}
-        onRequestClose={() => setModalVisible(false)}
-      >
-        <View style={styles.centeredView}>
-          <View style={[styles.modalView, { width: '90%' }]}>
-            <Text style={styles.subtitle}>
-              {id ? 'Editar Aluno' : 'Novo Aluno'}
-            </Text>
-
-            <View style={styles.inputContainer}>
-              <Text style={styles.label}>Nome</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Digite o nome do aluno"
-                placeholderTextColor={colors.textSecondary}
-                value={nome}
-                onChangeText={setNome}
-              />
-            </View>
-
-            <View style={styles.inputContainer}>
-              <Text style={styles.label}>Matrícula</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Digite a matrícula"
-                placeholderTextColor={colors.textSecondary}
-                value={matricula}
-                onChangeText={setMatricula}
-              />
-            </View>
-
-            <View style={styles.buttonContainer}>
-              <TouchableOpacity
-                style={[styles.button, styles.buttonSecondary]}
-                onPress={() => {
-                  resetForm();
-                  setModalVisible(false);
-                }}
-              >
-                <Text style={styles.buttonText}>Cancelar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.button, styles.buttonSuccess]}
-                onPress={saveStudent}
-              >
-                <Text style={styles.buttonText}>Salvar</Text>
-              </TouchableOpacity>
-            </View>
+        {students.length === 0 ? (
+          <View style={styles.emptyBox}>
+            <Text style={styles.mutedText}>Nenhum aluno cadastrado.</Text>
           </View>
-        </View>
-      </Modal>
-    </View>
+        ) : (
+          <FlatList
+            data={students}
+            keyExtractor={(item) => item.id}
+            renderItem={renderItem}
+            contentContainerStyle={styles.listGap}
+          />
+        )}
+
+        <Modal visible={modalVisible} transparent animationType="slide" onRequestClose={() => setModalVisible(false)}>
+          <View style={styles.modalOverlay}>
+            <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }}>
+              <View style={styles.modalCard}>
+                {/* O mesmo formulario atende criacao e edicao de aluno. */}
+                <Text style={styles.subtitle}>{editingId ? 'Editar aluno' : 'Novo aluno'}</Text>
+
+                <Text style={styles.label}>Nome</Text>
+                <TextInput
+                  style={styles.input}
+                  value={name}
+                  onChangeText={setName}
+                  placeholder="Ex.: Ana Souza"
+                  placeholderTextColor={colors.textMuted}
+                />
+
+                <Text style={styles.label}>Matrícula</Text>
+                <TextInput
+                  style={styles.input}
+                  value={registration}
+                  onChangeText={setRegistration}
+                  placeholder="Ex.: 202600123"
+                  placeholderTextColor={colors.textMuted}
+                />
+
+                <View style={styles.row}>
+                  <TouchableOpacity
+                    style={[styles.button, styles.buttonOutline, { flex: 1 }]}
+                    onPress={() => {
+                      setModalVisible(false);
+                      resetForm();
+                    }}
+                  >
+                    <Text style={styles.buttonText}>Cancelar</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.button, styles.buttonSuccess, { flex: 1 }]}
+                    onPress={saveStudent}
+                  >
+                    <Text style={styles.buttonText}>Salvar</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </ScrollView>
+          </View>
+        </Modal>
+      </View>
+    </SafeAreaView>
   );
 }

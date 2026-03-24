@@ -1,204 +1,257 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, Text, TouchableOpacity, ScrollView, Alert, Modal, FlatList, TextInput
+  Alert,
+  FlatList,
+  Modal,
+  SafeAreaView,
+  ScrollView,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-import * as DbService from '../services/dbservice';
+import { useFocusEffect } from '@react-navigation/native';
 import styles, { colors } from '../styles';
+import {
+  createId,
+  deleteActivity,
+  getActivitiesByWork,
+  getWorks,
+  getWorkStudents,
+  insertActivity,
+  updateActivity,
+} from '../services/db';
+
+const activityStatuses = ['pendente', 'concluída', 'cancelada'];
 
 export default function ProgressScreen() {
   const [works, setWorks] = useState([]);
-  const [students, setStudents] = useState([]);
   const [selectedWorkId, setSelectedWorkId] = useState(null);
   const [tasks, setTasks] = useState([]);
-  const [modalVisible, setModalVisible] = useState(false);
-  const [taskModalVisible, setTaskModalVisible] = useState(false);
-  
-  const [taskId, setTaskId] = useState(null);
-  const [descricao, setDescricao] = useState('');
-  const [horasEstimadas, setHorasEstimadas] = useState('');
-  const [horasRealizadas, setHorasRealizadas] = useState('');
-  const [taskStatus, setTaskStatus] = useState('pendente');
-  const [selectedAluno, setSelectedAluno] = useState(null);
   const [workStudents, setWorkStudents] = useState([]);
+  const [modalVisible, setModalVisible] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [description, setDescription] = useState('');
+  const [studentId, setStudentId] = useState('');
+  const [estimatedHours, setEstimatedHours] = useState('');
+  const [completedHours, setCompletedHours] = useState('0');
+  const [status, setStatus] = useState('pendente');
 
-  useEffect(() => {
-    loadWorks();
-    loadStudents();
-  }, []);
+  const loadWorks = async () => {
+    // Carrega os trabalhos disponiveis e ajusta a selecao atual quando necessario.
+    const result = await getWorks();
+    setWorks(result);
 
-  useEffect(() => {
-    if (selectedWorkId) {
-      loadTasks(selectedWorkId);
-      loadWorkStudents(selectedWorkId);
+    const hasSelected = result.some((item) => item.id === selectedWorkId);
+    if (!hasSelected && result.length > 0) {
+      setSelectedWorkId(result[0].id);
     }
-  }, [selectedWorkId]);
 
-  async function loadWorks() {
-    const data = await DbService.obtemTodosTrabalhos();
-    setWorks(data);
-  }
+    if (result.length === 0) {
+      setSelectedWorkId(null);
+    }
+  };
 
-  async function loadStudents() {
-    const data = await DbService.obtemTodosAlunos();
-    setStudents(data);
-  }
-
-  async function loadTasks(workId) {
-    const data = await DbService.obtemAtividadesDoTrabalho(workId);
-    setTasks(data);
-  }
-
-  async function loadWorkStudents(workId) {
-    const data = await DbService.obtemAlunosDoTrabalho(workId);
-    setWorkStudents(data);
-  }
-
-  function createUniqueId() {
-    return Date.now().toString();
-  }
-
-  function resetTaskForm() {
-    setTaskId(null);
-    setDescricao('');
-    setHorasEstimadas('');
-    setHorasRealizadas('');
-    setTaskStatus('pendente');
-    setSelectedAluno(null);
-  }
-
-  async function saveTask() {
-    if (!descricao.trim() || !horasEstimadas.trim() || !selectedAluno) {
-      Alert.alert('Erro', 'Preencha todos os campos e selecione um aluno');
+  const loadCurrentWorkData = async (workId) => {
+    // Busca em paralelo as atividades e os alunos vinculados ao trabalho escolhido.
+    if (!workId) {
+      setTasks([]);
+      setWorkStudents([]);
       return;
     }
 
-    const task = {
-      id: taskId || createUniqueId(),
-      idTrabalho: selectedWorkId,
-      idAluno: selectedAluno,
-      descricao: descricao.trim(),
-      horasEstimadas: parseFloat(horasEstimadas),
-      horasRealizadas: parseFloat(horasRealizadas || '0'),
-      status: taskStatus,
+    const [activities, students] = await Promise.all([
+      getActivitiesByWork(workId),
+      getWorkStudents(workId),
+    ]);
+
+    setTasks(activities);
+    setWorkStudents(students);
+  };
+
+  useFocusEffect(
+    useCallback(() => {
+      loadWorks();
+    }, [selectedWorkId])
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      loadCurrentWorkData(selectedWorkId);
+    }, [selectedWorkId])
+  );
+
+  const selectedWork = useMemo(
+    () => works.find((work) => work.id === selectedWorkId) || null,
+    [works, selectedWorkId]
+  );
+
+  const summary = useMemo(() => {
+    // Resume o avanco total para alimentar o cartao de progresso do trabalho.
+    const estimated = tasks.reduce((sum, item) => sum + Number(item.estimated_hours || 0), 0);
+    const completed = tasks.reduce((sum, item) => sum + Number(item.completed_hours || 0), 0);
+    const percent = estimated > 0 ? Math.min((completed / estimated) * 100, 100) : 0;
+    return { estimated, completed, percent };
+  }, [tasks]);
+
+  const resetForm = () => {
+    setEditingId(null);
+    setDescription('');
+    setStudentId('');
+    setEstimatedHours('');
+    setCompletedHours('0');
+    setStatus('pendente');
+  };
+
+  const openCreate = () => {
+    // So permite cadastrar atividade quando existir um trabalho e alunos associados.
+    if (!selectedWorkId) {
+      Alert.alert('Atenção', 'Selecione um trabalho primeiro.');
+      return;
+    }
+
+    if (workStudents.length === 0) {
+      Alert.alert('Atenção', 'Vincule alunos ao trabalho antes de cadastrar atividades.');
+      return;
+    }
+
+    resetForm();
+    setStudentId(workStudents[0]?.id || '');
+    setModalVisible(true);
+  };
+
+  const openEdit = (task) => {
+    setEditingId(task.id);
+    setDescription(task.description);
+    setStudentId(task.student_id);
+    setEstimatedHours(String(task.estimated_hours));
+    setCompletedHours(String(task.completed_hours));
+    setStatus(task.status);
+    setModalVisible(true);
+  };
+
+  const saveTask = async () => {
+    // Normaliza os valores do formulario antes de persistir a atividade.
+    if (!description.trim() || !estimatedHours.trim() || !studentId) {
+      Alert.alert('Validação', 'Informe descrição, aluno e horas estimadas.');
+      return;
+    }
+
+    const estimated = Number(estimatedHours);
+    const completed = Number(completedHours || 0);
+
+    if (Number.isNaN(estimated) || estimated <= 0) {
+      Alert.alert('Validação', 'As horas estimadas devem ser maiores que zero.');
+      return;
+    }
+
+    if (Number.isNaN(completed) || completed < 0) {
+      Alert.alert('Validação', 'As horas concluídas não podem ser negativas.');
+      return;
+    }
+
+    const activity = {
+      id: editingId || createId('activity'),
+      work_id: selectedWorkId,
+      student_id: studentId,
+      description: description.trim(),
+      estimated_hours: estimated,
+      completed_hours: completed,
+      status,
     };
 
     try {
-      let success = false;
-      if (taskId) {
-        success = await DbService.alteraAtividade(task);
-      } else {
-        success = await DbService.adicionaAtividade(task);
-      }
-
-      if (success) {
-        Alert.alert('Sucesso', taskId ? 'Atividade atualizada!' : 'Atividade adicionada!');
-        resetTaskForm();
-        setTaskModalVisible(false);
-        loadTasks(selectedWorkId);
+      const ok = editingId ? await updateActivity(activity) : await insertActivity(activity);
+      if (ok) {
+        setModalVisible(false);
+        resetForm();
+        await loadCurrentWorkData(selectedWorkId);
+        await loadWorks();
       }
     } catch (error) {
-      Alert.alert('Erro', 'Erro ao salvar atividade: ' + error.message);
+      Alert.alert('Erro', `Não foi possível salvar a atividade. ${error.message}`);
     }
-  }
+  };
 
-  function editTask(task) {
-    setTaskId(task.id);
-    setDescricao(task.descricao);
-    setHorasEstimadas(task.horasEstimadas.toString());
-    setHorasRealizadas(task.horasRealizadas.toString());
-    setTaskStatus(task.status);
-    setSelectedAluno(task.idAluno);
-    setTaskModalVisible(true);
-  }
-
-  async function deleteTask(taskId) {
+  const confirmDelete = (task) => {
     Alert.alert(
-      'Confirmar exclusão',
-      'Deseja excluir esta atividade?',
+      'Excluir atividade',
+      `Deseja remover a atividade "${task.description}"?`,
       [
         { text: 'Cancelar', style: 'cancel' },
         {
           text: 'Excluir',
+          style: 'destructive',
           onPress: async () => {
             try {
-              const success = await DbService.excluiAtividade(taskId);
-              if (success) {
-                Alert.alert('Sucesso', 'Atividade excluída!');
-                loadTasks(selectedWorkId);
-              }
+              await deleteActivity(task.id);
+              await loadCurrentWorkData(selectedWorkId);
+              await loadWorks();
             } catch (error) {
-              Alert.alert('Erro', 'Erro ao excluir atividade');
+              Alert.alert('Erro', 'Não foi possível excluir a atividade.');
             }
           },
         },
       ]
     );
-  }
+  };
 
-  function openAddTaskModal() {
-    resetTaskForm();
-    setTaskModalVisible(true);
-  }
+  const statusColor = (value) => {
+    if (value === 'concluída') return colors.success;
+    if (value === 'cancelada') return colors.error;
+    return colors.warning;
+  };
 
-  function getStatusColor(status) {
-    switch (status) {
-      case 'concluído':
-        return colors.success;
-      case 'cancelado':
-        return colors.error;
-      default:
-        return colors.warn;
-    }
-  }
+  const renderWorkSelector = ({ item }) => {
+    const active = item.id === selectedWorkId;
+    return (
+      <TouchableOpacity
+        style={[styles.pill, active && styles.pillActive, { marginRight: 8 }]}
+        onPress={() => setSelectedWorkId(item.id)}
+      >
+        <Text style={styles.pillText}>{item.name}</Text>
+      </TouchableOpacity>
+    );
+  };
 
   const renderTask = ({ item }) => {
-    const percentage = item.horasEstimadas > 0 
-      ? Math.min((item.horasRealizadas / item.horasEstimadas) * 100, 100)
+    // Calcula o percentual individual para exibir a barra de cada atividade.
+    const percent = item.estimated_hours > 0
+      ? Math.min((Number(item.completed_hours) / Number(item.estimated_hours)) * 100, 100)
       : 0;
 
     return (
       <View style={styles.card}>
-        <View style={styles.cardRow}>
+        <View style={styles.row}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.text}>{item.descricao}</Text>
-            <Text style={styles.textSecondary}>
-              Aluno: {workStudents.find(s => s.id === item.idAluno)?.nome || 'Desconhecido'}
+            <Text style={styles.strongText}>{item.description}</Text>
+            <Text style={styles.mutedText}>Aluno responsável: {item.student_name || 'Não identificado'}</Text>
+            <Text style={styles.mutedText}>
+              {item.completed_hours}h concluídas de {item.estimated_hours}h
             </Text>
           </View>
-          <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) }]}>
-            <Text style={styles.statusText}>{item.status}</Text>
+          <View style={[styles.badge, { backgroundColor: statusColor(item.status) }]}> 
+            <Text style={styles.badgeText}>{item.status}</Text>
           </View>
         </View>
 
-        <View style={styles.progressContainer}>
-          <View style={styles.cardRow}>
-            <Text style={styles.textSecondary}>
-              {item.horasRealizadas}h / {item.horasEstimadas}h
-            </Text>
-            <Text style={styles.textSecondary}>{percentage.toFixed(0)}%</Text>
-          </View>
-          <View style={styles.progressBar}>
-            <View
-              style={[
-                styles.progressFill,
-                { width: `${percentage}%` },
-              ]}
-            />
-          </View>
+        <View style={styles.progressTrack}>
+          <View style={[styles.progressFill, { width: `${percent}%` }]} />
         </View>
+        <Text style={[styles.mutedText, { marginTop: 8 }]}>{percent.toFixed(0)}% concluído</Text>
 
-        <View style={styles.buttonContainer}>
+        <View style={[styles.row, { marginTop: 12 }]}> 
           <TouchableOpacity
-            style={[styles.smallButton, { backgroundColor: colors.primary, flex: 1 }]}
-            onPress={() => editTask(item)}
+            style={[styles.smallButton, styles.button, { flex: 1 }]}
+            onPress={() => openEdit(item)}
           >
-            <Text style={styles.smallButtonText}>Editar</Text>
+            <Text style={styles.buttonText}>Editar</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.smallButton, { backgroundColor: colors.error, flex: 1 }]}
-            onPress={() => deleteTask(item.id)}
+            style={[styles.smallButton, styles.buttonDanger, { flex: 1 }]}
+            onPress={() => confirmDelete(item)}
           >
-            <Text style={styles.smallButtonText}>Excluir</Text>
+            <Text style={styles.buttonText}>Excluir</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -206,187 +259,149 @@ export default function ProgressScreen() {
   };
 
   return (
-    <View style={styles.screenContainer}>
-      <Text style={styles.title}>Andamento de Atividades</Text>
+    <SafeAreaView style={styles.safe}>
+      <View style={styles.screen}>
+        <Text style={styles.title}>Andamento das Atividades</Text>
+        <Text style={styles.helper}>Escolha um trabalho e informe horas realizadas e situação das atividades.</Text>
 
-      {/* Seleção de Trabalho */}
-      {works.length > 0 ? (
-        <View>
-          <Text style={styles.label}>Selecione um Trabalho:</Text>
-          <FlatList
-            data={works}
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                style={[
-                  styles.listItem,
-                  {
-                    backgroundColor:
-                      selectedWorkId === item.id ? colors.primary : colors.surface,
-                  },
-                ]}
-                onPress={() => setSelectedWorkId(item.id)}
-              >
-                <Text style={styles.text}>{item.nome}</Text>
-              </TouchableOpacity>
-            )}
-            keyExtractor={(item) => item.id}
-            scrollEnabled={false}
-          />
-        </View>
-      ) : (
-        <View style={{ alignItems: 'center', justifyContent: 'center', flex: 0.3 }}>
-          <Text style={styles.textSecondary}>Nenhum trabalho disponível</Text>
-        </View>
-      )}
-
-      {/* Atividades do Trabalho Selecionado */}
-      {selectedWorkId && (
-        <View style={{ flex: 1, marginTop: 16 }}>
-          <View style={styles.cardRow}>
-            <Text style={styles.subtitle}>Atividades</Text>
-            <TouchableOpacity
-              style={[styles.smallButton, { backgroundColor: colors.success }]}
-              onPress={openAddTaskModal}
-            >
-              <Text style={styles.smallButtonText}>+ Nova</Text>
-            </TouchableOpacity>
+        {works.length === 0 ? (
+          <View style={styles.emptyBox}>
+            <Text style={styles.mutedText}>Cadastre um trabalho antes de gerenciar o andamento.</Text>
           </View>
-
-          {tasks.length > 0 ? (
-            <FlatList
-              data={tasks}
-              renderItem={renderTask}
-              keyExtractor={(item) => item.id}
-              scrollEnabled={false}
-            />
-          ) : (
-            <View style={{ alignItems: 'center', justifyContent: 'center', flex: 0.5 }}>
-              <Text style={styles.textSecondary}>Nenhuma atividade cadastrada</Text>
+        ) : (
+          <>
+            <View style={styles.section}>
+              <Text style={styles.label}>Trabalho selecionado</Text>
+              <FlatList
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                data={works}
+                keyExtractor={(item) => item.id}
+                renderItem={renderWorkSelector}
+              />
             </View>
-          )}
-        </View>
-      )}
 
-      {/* Modal para adicionar/editar atividade */}
-      <Modal
-        animationType="slide"
-        transparent={true}
-        visible={taskModalVisible}
-        onRequestClose={() => setTaskModalVisible(false)}
-      >
-        <View style={styles.centeredView}>
-          <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }}>
-            <View style={[styles.modalView, { width: '90%' }]}>
-              <Text style={styles.subtitle}>
-                {taskId ? 'Editar Atividade' : 'Nova Atividade'}
-              </Text>
+            {selectedWork && (
+              <View style={styles.card}>
+                <Text style={styles.strongText}>{selectedWork.name}</Text>
+                <Text style={styles.mutedText}>Entrega: {selectedWork.due_date}</Text>
+                <Text style={styles.mutedText}>Progresso total das atividades: {summary.completed}h / {summary.estimated}h</Text>
+                <View style={styles.progressTrack}>
+                  <View style={[styles.progressFill, { width: `${summary.percent}%` }]} />
+                </View>
+                <Text style={[styles.mutedText, { marginTop: 8 }]}>{summary.percent.toFixed(0)}% concluído</Text>
+              </View>
+            )}
 
-              <View style={styles.inputContainer}>
+            <View style={[styles.row, { marginBottom: 12 }]}> 
+              <Text style={styles.subtitle}>CRUD de Atividades</Text>
+              <TouchableOpacity style={[styles.smallButton, styles.buttonSuccess]} onPress={openCreate}>
+                <Text style={styles.buttonText}>+ Atividade</Text>
+              </TouchableOpacity>
+            </View>
+
+            {tasks.length === 0 ? (
+              <View style={styles.emptyBox}>
+                <Text style={styles.mutedText}>Nenhuma atividade cadastrada para este trabalho.</Text>
+              </View>
+            ) : (
+              <FlatList
+                data={tasks}
+                keyExtractor={(item) => item.id}
+                renderItem={renderTask}
+                contentContainerStyle={styles.listGap}
+              />
+            )}
+          </>
+        )}
+
+        <Modal visible={modalVisible} transparent animationType="slide" onRequestClose={() => setModalVisible(false)}>
+          <View style={styles.modalOverlay}>
+            <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }}>
+              <View style={styles.modalCard}>
+                <Text style={styles.subtitle}>{editingId ? 'Editar atividade' : 'Nova atividade'}</Text>
+
                 <Text style={styles.label}>Descrição</Text>
                 <TextInput
                   style={styles.input}
-                  placeholder="Digite a descrição da atividade"
-                  placeholderTextColor={colors.textSecondary}
-                  value={descricao}
-                  onChangeText={setDescricao}
+                  value={description}
+                  onChangeText={setDescription}
+                  placeholder="Ex.: Criar capa do trabalho"
+                  placeholderTextColor={colors.textMuted}
                   multiline
-                  numberOfLines={3}
                 />
-              </View>
 
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>Aluno</Text>
-                <ScrollView
-                  style={{ maxHeight: 150, marginBottom: 12 }}
-                  nestedScrollEnabled
-                >
-                  {workStudents.map((student) => (
-                    <TouchableOpacity
-                      key={student.id}
-                      style={[
-                        styles.listItem,
-                        {
-                          backgroundColor:
-                            selectedAluno === student.id ? colors.primary : colors.surface,
-                        },
-                      ]}
-                      onPress={() => setSelectedAluno(student.id)}
-                    >
-                      <Text style={styles.text}>{student.nome}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              </View>
+                <Text style={styles.label}>Aluno responsável</Text>
+                <View style={[styles.wrapRow, { marginBottom: 12 }]}> 
+                  {workStudents.map((student) => {
+                    const active = student.id === studentId;
+                    return (
+                      <TouchableOpacity
+                        key={student.id}
+                        style={[styles.pill, active && styles.pillActive]}
+                        onPress={() => setStudentId(student.id)}
+                      >
+                        <Text style={styles.pillText}>{student.name}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
 
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>Horas Estimadas</Text>
+                <Text style={styles.label}>Horas estimadas</Text>
                 <TextInput
                   style={styles.input}
-                  placeholder="Digite as horas"
-                  placeholderTextColor={colors.textSecondary}
-                  value={horasEstimadas}
-                  onChangeText={setHorasEstimadas}
+                  value={estimatedHours}
+                  onChangeText={setEstimatedHours}
+                  placeholder="Ex.: 4"
+                  placeholderTextColor={colors.textMuted}
                   keyboardType="decimal-pad"
                 />
-              </View>
 
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>Horas Realizadas</Text>
+                <Text style={styles.label}>Horas já desenvolvidas</Text>
                 <TextInput
                   style={styles.input}
-                  placeholder="Digite as horas realizadas"
-                  placeholderTextColor={colors.textSecondary}
-                  value={horasRealizadas}
-                  onChangeText={setHorasRealizadas}
+                  value={completedHours}
+                  onChangeText={setCompletedHours}
+                  placeholder="Ex.: 2"
+                  placeholderTextColor={colors.textMuted}
                   keyboardType="decimal-pad"
                 />
-              </View>
 
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>Status</Text>
-                <View style={{ flexDirection: 'row', gap: 8 }}>
-                  {['pendente', 'concluído', 'cancelado'].map((s) => (
+                <Text style={styles.label}>Situação da atividade</Text>
+                <View style={[styles.wrapRow, { marginBottom: 12 }]}> 
+                  {activityStatuses.map((item) => (
                     <TouchableOpacity
-                      key={s}
-                      style={[
-                        styles.button,
-                        {
-                          flex: 1,
-                          backgroundColor:
-                            taskStatus === s ? colors.primary : colors.surface,
-                          borderWidth: 1,
-                          borderColor: colors.primary,
-                        },
-                      ]}
-                      onPress={() => setTaskStatus(s)}
+                      key={item}
+                      style={[styles.pill, status === item && styles.pillActive]}
+                      onPress={() => setStatus(item)}
                     >
-                      <Text style={styles.buttonText}>{s}</Text>
+                      <Text style={styles.pillText}>{item}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>
-              </View>
 
-              <View style={styles.buttonContainer}>
-                <TouchableOpacity
-                  style={[styles.button, styles.buttonSecondary]}
-                  onPress={() => {
-                    resetTaskForm();
-                    setTaskModalVisible(false);
-                  }}
-                >
-                  <Text style={styles.buttonText}>Cancelar</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.button, styles.buttonSuccess]}
-                  onPress={saveTask}
-                >
-                  <Text style={styles.buttonText}>Salvar</Text>
-                </TouchableOpacity>
+                <View style={styles.row}>
+                  <TouchableOpacity
+                    style={[styles.button, styles.buttonOutline, { flex: 1 }]}
+                    onPress={() => {
+                      setModalVisible(false);
+                      resetForm();
+                    }}
+                  >
+                    <Text style={styles.buttonText}>Cancelar</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.button, styles.buttonSuccess, { flex: 1 }]}
+                    onPress={saveTask}
+                  >
+                    <Text style={styles.buttonText}>Salvar</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
-            </View>
-          </ScrollView>
-        </View>
-      </Modal>
-    </View>
+            </ScrollView>
+          </View>
+        </Modal>
+      </View>
+    </SafeAreaView>
   );
 }

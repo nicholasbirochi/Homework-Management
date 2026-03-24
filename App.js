@@ -1,79 +1,73 @@
+import 'react-native-gesture-handler';
 import React, { useEffect } from 'react';
+import { Text } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { StatusBar } from 'expo-status-bar';
-import * as DbService from './services/dbservice';
 import StudentsScreen from './screens/StudentsScreen';
 import WorksScreen from './screens/WorksScreen';
 import ProgressScreen from './screens/ProgressScreen';
-import { colors } from './styles';
+import ChartsScreen from './screens/ChartsScreen';
+import { initializeDatabase } from './services/db';
+import styles, { colors } from './styles';
 
 const Tab = createBottomTabNavigator();
 
+// Renderiza um "icone" simples usando emoji para cada aba.
+const icon = (emoji, color) => <Text style={{ fontSize: 18, color }}>{emoji}</Text>;
+
 export default function App() {
   useEffect(() => {
-    // Inicializar banco de dados
-    const initializeDB = async () => {
-      try {
-        await DbService.createTable();
-        console.log('Banco de dados inicializado com sucesso');
-      } catch (error) {
-        console.error('Erro ao inicializar banco de dados:', error);
-      }
-    };
-    initializeDB();
+    // Garante que as tabelas do banco existam antes de o usuario navegar pelo app.
+    initializeDatabase().catch((error) => {
+      console.error('Database initialization error:', error);
+    });
   }, []);
 
   return (
     <>
-      <StatusBar barStyle="light-content" backgroundColor={colors.background} />
+      <StatusBar style="light" backgroundColor={colors.background} />
       <NavigationContainer>
         <Tab.Navigator
+          // Centraliza a configuracao visual usada em todas as abas inferiores.
           screenOptions={{
             headerShown: false,
+            tabBarStyle: styles.tabBar,
             tabBarActiveTintColor: colors.primary,
-            tabBarInactiveTintColor: colors.textSecondary,
-            tabBarStyle: {
-              backgroundColor: colors.surface,
-              borderTopColor: colors.primary,
-              borderTopWidth: 1,
-              paddingBottom: 5,
-              paddingTop: 5,
-            },
-            tabBarLabelStyle: {
-              fontSize: 12,
-              marginTop: -5,
-            },
+            tabBarInactiveTintColor: colors.textMuted,
+            tabBarLabelStyle: { fontSize: 11, fontWeight: '700' },
           }}
         >
           <Tab.Screen
-            name="Alunos"
+            name="Students"
             component={StudentsScreen}
             options={{
               tabBarLabel: 'Alunos',
-              tabBarIcon: ({ color }) => (
-                <Text style={{ fontSize: 20, color }}>👥</Text>
-              ),
+              tabBarIcon: ({ color }) => icon('👥', color),
             }}
           />
           <Tab.Screen
-            name="Trabalhos"
+            name="Works"
             component={WorksScreen}
             options={{
               tabBarLabel: 'Trabalhos',
-              tabBarIcon: ({ color }) => (
-                <Text style={{ fontSize: 20, color }}>📋</Text>
-              ),
+              tabBarIcon: ({ color }) => icon('📚', color),
             }}
           />
           <Tab.Screen
-            name="Progresso"
+            name="Progress"
             component={ProgressScreen}
             options={{
-              tabBarLabel: 'Progresso',
-              tabBarIcon: ({ color }) => (
-                <Text style={{ fontSize: 20, color }}>⏳</Text>
-              ),
+              tabBarLabel: 'Andamento',
+              tabBarIcon: ({ color }) => icon('⏱️', color),
+            }}
+          />
+          <Tab.Screen
+            name="Charts"
+            component={ChartsScreen}
+            options={{
+              tabBarLabel: 'Gráfico',
+              tabBarIcon: ({ color }) => icon('📊', color),
             }}
           />
         </Tab.Navigator>
@@ -81,6 +75,3 @@ export default function App() {
     </>
   );
 }
-
-import { Text } from 'react-native';
-
