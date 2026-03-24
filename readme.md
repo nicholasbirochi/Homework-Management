@@ -1,8 +1,6 @@
 # Homework Management Mobile
 
-**GitHub description:** N2 - Homework Management mobile app built with React Native, Expo and SQLite for managing students, school works, activities, progress and charts.
-
-Aplicação mobile desenvolvida em React Native + Expo com persistência em SQLite para controlar trabalhos escolares.
+Aplicativo de estudo para organizar alunos, trabalhos escolares e atividades. Usa React Native com Expo e guarda os registros localmente em SQLite; as telas de andamento e gráficos ajudam a acompanhar o que falta concluir.
 
 ## Requisitos atendidos
 
@@ -24,7 +22,7 @@ homework-management-mobile/
 ├── babel.config.js
 ├── package.json
 ├── styles.js
-├── README.md
+├── readme.md
 ├── services/
 │   └── db.js
 └── screens/
@@ -46,3 +44,7 @@ npx expo start
 - Não enviar `node_modules` para o Moodle.
 - O banco é criado automaticamente no primeiro uso.
 - O projeto foi enxugado para conter apenas os arquivos realmente necessários para execução e apresentação.
+
+## Licença
+
+Código e documentação autorais sob [MIT](license).
